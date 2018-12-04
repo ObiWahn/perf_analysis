@@ -3,8 +3,8 @@
 #include <iostream>
 #include <fstream>
 #include <charconv>
-#include <map>
 #include <unordered_map>
+#include <iomanip>
 
 #include <tao/pegtl.hpp>
 
@@ -17,16 +17,9 @@ namespace pegtl = tao::pegtl;
 
 
 struct event {
-    event() = default;
-    event(event&&) = default;
-    event& operator=(event&&) = default;
-    event(event const&) = delete;
-    event& operator=(event const&) = delete;
-
-
     double time = 0;
     double duration = -1;
-    std::uint32_t tid;
+    std::uint32_t tid = 0;
     //std::uint32_t pid;
     //std::string thread_name;
     std::string group_name;
@@ -45,15 +38,14 @@ std::ostream& operator<<(std::ostream& os, event const& e) {
 }
 
 bool operator<(event const& left, event const& right) {
-    std::cout << "comp - l: " << left << " r: " << right << std::endl;
     if(left.group_name < right.group_name) {
         return true;
     } else if(left.group_name > right.group_name) {
-        return true;
+        return false;
     } else if(left.function_name < right.function_name) {
         return true;
     } else if(left.function_name > right.function_name) {
-        return true;
+        return false;
     } else {
         return left.duration < right.duration;
     }
@@ -61,7 +53,6 @@ bool operator<(event const& left, event const& right) {
 
 namespace pbench {
     using namespace pegtl;
-
 
     // basic rules
     using white = plus< space >;
@@ -129,6 +120,9 @@ namespace pbench {
         template <typename input>
         static void apply(input const& in, event& v){
             auto rv = std::from_chars(in.begin(), in.end(), v.tid);
+            if (rv.ec == std::errc::invalid_argument) {
+                std::cerr << "failed to convert tid" << std::endl;
+            }
         }
     };
 
@@ -138,6 +132,60 @@ namespace pbench {
             v.is_return = true;
         }
     };
+}
+
+template <typename random_access_iterator>
+void printStats(random_access_iterator begin, random_access_iterator end){
+    if (begin == end){
+        // empty range
+        return;
+    }
+    std::cout << begin->group_name <<":"<< begin->function_name << std::endl;
+
+    auto n = std::distance(begin, end);
+    if (n < 2) {
+        std::cout << "all: " << *begin << std::endl;
+    }
+
+    auto& min = *begin;
+    auto& five = *(begin+(n/100)*5);
+    auto& ten = *(begin+(n/100)*10);
+    auto& med = *(begin+(n/2));
+    auto& ninty = *(begin+(n/100)*90);
+    auto& nintyfive = *(begin+(n/100)*95);
+    auto& max = *(end-1);
+
+
+    const double m = 1000000;
+    std::cout << std::fixed << std::setprecision(2)
+              << " MIN: " << min.duration * m
+              << " - 5th: " << five.duration * m
+              << " - 10th: " << ten.duration * m
+              << " - MED: " << med.duration * m
+              << " - 90th: " << ninty.duration * m
+              << " - 95th: " << nintyfive.duration * m
+              << " - MAX: " << max.duration * m
+              << std::endl;
+}
+
+template <typename iter, typename predicate>
+std::vector<iter> split_range(iter begin, iter end, predicate pred){
+    std::vector<iter> rv;
+    rv.push_back(begin);
+
+    iter current = begin;
+    while(current!=end){
+        auto next = std::next(current);
+        if (next != end) {
+            if(pred(*current, *next)) {
+                rv.push_back(next);
+            }
+        }
+        current = next;
+    }
+
+    rv.push_back(end);
+    return rv;
 }
 
 int main(int argc, char* argv[]){
@@ -151,15 +199,17 @@ int main(int argc, char* argv[]){
     std::unordered_map<std::string, event> new_events;
     std::vector<event> final_events;
 
+    std::size_t linenumber = 0;
     if (file.is_open()) {
         std::string line;
         while (getline(file, line)) {
+            ++linenumber;
             event new_event;
             pegtl::string_input in(line, filename);
             auto parse_result = pegtl::parse<pbench::grammar, pbench::action>(in, new_event);
             if(parse_result) {
                 // std::cout << new_event << std::endl;
-                auto id = new_event.id();
+                std::string id = new_event.id();
                 auto found = new_events.find(id);
 
                 if (found != new_events.end()){
@@ -171,28 +221,30 @@ int main(int argc, char* argv[]){
                         final_events.push_back(std::move(old_event));
                         new_events.erase(found);
                     } else {
-                        // fail - double enter
+                        std::cerr << "double enter of function in line: " << linenumber << std::endl
+                                  << line << std::endl;
                     }
                 } else {
                     if(new_event.is_return) {
-                        // fail - exit function before entering it
+                        std::cerr << "exiting function before enterning it in line: " << linenumber << std::endl
+                                  << line << std::endl;
                     } else {
                         new_events.emplace(std::move(id),std::move(new_event));
                     }
                 }
             } else {
-                std::cerr << "failed to parse line: '" << line << "'" << std::endl;
+                std::cerr << "failed to parse line(" << linenumber << "): '" << line << "'" << std::endl;
             }
         }
         file.close();
     }
 
-    for(auto const& event : final_events) {
-        std::cout << event << std::endl;
-        if(event.duration == 0 || event.function_name.empty()) {
-            std::cout << "broken event";
-            return 1;
-        }
+    std::sort(final_events.begin(), final_events.end());
+    auto split_points = split_range(final_events.begin(), final_events.end()
+                                   ,[](auto l, auto r){ return l.group_name != r.group_name || l.function_name != r.function_name; }
+                                   );
+    for(auto point = split_points.begin(); std::next(point) != split_points.end(); ++point ) {
+        printStats(*point, *std::next(point));
     }
 
     return 0;
