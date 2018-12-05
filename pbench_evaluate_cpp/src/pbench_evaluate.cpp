@@ -1,4 +1,5 @@
-// ccopy
+// Copyright - 2018 - Jan Christoph Uhde <Jan@UhdeJC.com>
+
 #include <string>
 #include <iostream>
 #include <fstream>
@@ -8,14 +9,13 @@
 
 #include <tao/pegtl.hpp>
 
-
 namespace pegtl = tao::pegtl;
 
 //       Scheduler 10231/10238 [001] 2711293.466369:           group:function: (55d39097b05c)
 //       Scheduler 10231/10238 [001] 2711293.466398:   group:function__return: (55d39097b05c <- 55d390e4cbbf)
 //       ThreadName tid/pid    [cpu] ti.me:            group:function__return: (55d39097b05c <- 55d390e4cbbf)
 
-
+namespace pbench {
 struct event {
     double time = 0;
     double duration = -1;
@@ -51,7 +51,7 @@ bool operator<(event const& left, event const& right) {
     }
 }
 
-namespace pbench {
+namespace parser {
     using namespace pegtl;
 
     // basic rules
@@ -132,7 +132,7 @@ namespace pbench {
             v.is_return = true;
         }
     };
-}
+} // namespace pbench::parser
 
 template <typename random_access_iterator>
 void printStats(random_access_iterator begin, random_access_iterator end){
@@ -188,6 +188,8 @@ std::vector<iter> split_range(iter begin, iter end, predicate pred){
     return rv;
 }
 
+} //namespace pbench
+
 int main(int argc, char* argv[]){
     if ( argc <= 1) {
         return 1;
@@ -196,17 +198,17 @@ int main(int argc, char* argv[]){
     std::string filename(argv[1]);
     std::ifstream file(filename);
 
-    std::unordered_map<std::string, event> new_events;
-    std::vector<event> final_events;
+    std::unordered_map<std::string, pbench::event> new_events;
+    std::vector<pbench::event> final_events;
 
     std::size_t linenumber = 0;
     if (file.is_open()) {
         std::string line;
         while (getline(file, line)) {
             ++linenumber;
-            event new_event;
+            pbench::event new_event;
             pegtl::string_input in(line, filename);
-            auto parse_result = pegtl::parse<pbench::grammar, pbench::action>(in, new_event);
+            auto parse_result = pegtl::parse<pbench::parser::grammar, pbench::parser::action>(in, new_event);
             if(parse_result) {
                 // std::cout << new_event << std::endl;
                 std::string id = new_event.id();
