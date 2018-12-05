@@ -242,11 +242,11 @@ int main(int argc, char* argv[]){
     }
 
     std::sort(final_events.begin(), final_events.end());
-    auto split_points = split_range(final_events.begin(), final_events.end()
+    auto ranges = split_range(final_events.begin(), final_events.end()
                                    ,[](auto l, auto r){ return l.group_name != r.group_name || l.function_name != r.function_name; }
                                    );
-    for(auto point = split_points.begin(); std::next(point) != split_points.end(); ++point ) {
-        printStats(*point, *std::next(point));
+    for(auto range_begin = ranges.begin(); std::next(range_begin) != ranges.end(); ++range_begin ) {
+        printStats(*range_begin, *std::next(range_begin));
     }
 
     return 0;
